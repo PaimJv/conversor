@@ -237,38 +237,41 @@
                             return;
                         }
 
-                        // Stepwise scaling for 8x to reduce memory usage
-                        let steps = scaleFactor === 8 ? 2 : 1;
-                        let currentScale = scaleFactor === 8 ? 4 : scaleFactor;
+                        let currentCanvas = document.createElement('canvas');
+                        let currentContext = currentCanvas.getContext('2d');
                         let currentWidth = img.width;
                         let currentHeight = img.height;
 
-                        for (let i = 0; i < steps; i++) {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = currentWidth * currentScale;
-                            canvas.height = currentHeight * currentScale;
-                            const context = canvas.getContext('2d');
+                        // Stepwise scaling for 8x to reduce memory usage
+                        if (scaleFactor === 8) {
+                            // First step: scale to 4x
+                            currentCanvas.width = img.width * 4;
+                            currentCanvas.height = img.height * 4;
+                            currentContext.imageSmoothingEnabled = true;
+                            currentContext.imageSmoothingQuality = 'high';
+                            currentContext.drawImage(img, 0, 0, currentCanvas.width, currentCanvas.height);
 
-                            context.imageSmoothingEnabled = true;
-                            context.imageSmoothingQuality = 'high';
-                            context.drawImage(i === 0 ? img : canvas, 0, 0, canvas.width, canvas.height);
-
-                            currentWidth = canvas.width;
-                            currentHeight = canvas.height;
-                            currentScale = scaleFactor === 8 ? 2 : 1;
+                            // Second step: scale from 4x to 8x
+                            const tempCanvas = currentCanvas;
+                            currentCanvas = document.createElement('canvas');
+                            currentCanvas.width = targetWidth;
+                            currentCanvas.height = targetHeight;
+                            currentContext = currentCanvas.getContext('2d');
+                            currentContext.imageSmoothingEnabled = true;
+                            currentContext.imageSmoothingQuality = 'high';
+                            currentContext.drawImage(tempCanvas, 0, 0, currentCanvas.width, currentCanvas.height);
+                        } else {
+                            // Direct scaling for 2x or 4x
+                            currentCanvas.width = targetWidth;
+                            currentCanvas.height = targetHeight;
+                            currentContext.imageSmoothingEnabled = true;
+                            currentContext.imageSmoothingQuality = 'high';
+                            currentContext.drawImage(img, 0, 0, currentCanvas.width, currentCanvas.height);
                         }
-
-                        const finalCanvas = document.createElement('canvas');
-                        finalCanvas.width = targetWidth;
-                        finalCanvas.height = targetHeight;
-                        const finalContext = finalCanvas.getContext('2d');
-                        finalContext.imageSmoothingEnabled = true;
-                        finalContext.imageSmoothingQuality = 'high';
-                        finalContext.drawImage(canvas, 0, 0, targetWidth, targetHeight);
 
                         const link = document.createElement('a');
                         link.download = `${fileName}-up.png`;
-                        link.href = finalCanvas.toDataURL('image/png', 1.0);
+                        link.href = currentCanvas.toDataURL('image/png', 1.0);
                         link.click();
                     } catch (error) {
                         alert('Erro ao realizar upscale da imagem: ' + error.message);
@@ -301,37 +304,35 @@
                         return;
                     }
 
-                    const canvas = document.createElement('canvas');
-                    canvas.height = scaledViewport.height;
-                    canvas.width = scaledViewport.width;
-                    const context = canvas.getContext('2d');
-
-                    context.imageSmoothingEnabled = true;
-                    context.imageSmoothingQuality = 'high';
+                    let currentCanvas = document.createElement('canvas');
+                    let currentContext = currentCanvas.getContext('2d');
 
                     // Stepwise rendering for 8x
-                    let steps = scaleFactor === 8 ? 2 : 1;
-                    let currentScale = scaleFactor === 8 ? 4 : scaleFactor;
-                    let tempViewport = page.getViewport({ scale: currentScale });
+                    if (scaleFactor === 8) {
+                        // First step: render at 4x
+                        let tempViewport = page.getViewport({ scale: 4 });
+                        currentCanvas.width = tempViewport.width;
+                        currentCanvas.height = tempViewport.height;
+                        currentContext.imageSmoothingEnabled = true;
+                        currentContext.imageSmoothingQuality = 'high';
+                        await page.render({ canvasContext: currentContext, viewport: tempViewport }).promise;
 
-                    for (let i = 0; i < steps; i++) {
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.height = tempViewport.height;
-                        tempCanvas.width = tempViewport.width;
-                        const tempContext = tempCanvas.getContext('2d');
-                        tempContext.imageSmoothingEnabled = true;
-                        tempContext.imageSmoothingQuality = 'high';
-
-                        await page.render({ canvasContext: tempContext, viewport: tempViewport }).promise;
-
-                        if (i < steps - 1) {
-                            tempViewport = page.getViewport({ scale: scaleFactor });
-                            canvas.height = tempViewport.height;
-                            canvas.width = tempViewport.width;
-                            context.drawImage(tempCanvas, 0, 0, tempViewport.width, tempViewport.height);
-                        } else {
-                            context.drawImage(tempCanvas, 0, 0, scaledViewport.width, scaledViewport.height);
-                        }
+                        // Second step: scale from 4x to 8x
+                        const tempCanvas = currentCanvas;
+                        currentCanvas = document.createElement('canvas');
+                        currentCanvas.width = scaledViewport.width;
+                        currentCanvas.height = scaledViewport.height;
+                        currentContext = currentCanvas.getContext('2d');
+                        currentContext.imageSmoothingEnabled = true;
+                        currentContext.imageSmoothingQuality = 'high';
+                        currentContext.drawImage(tempCanvas, 0, 0, scaledViewport.width, scaledViewport.height);
+                    } else {
+                        // Direct rendering for 2x or 4x
+                        currentCanvas.width = scaledViewport.width;
+                        currentCanvas.height = scaledViewport.height;
+                        currentContext.imageSmoothingEnabled = true;
+                        currentContext.imageSmoothingQuality = 'high';
+                        await page.render({ canvasContext: currentContext, viewport: scaledViewport }).promise;
                     }
 
                     if (pageNum > 1) {
@@ -341,7 +342,7 @@
                         newPdf.internal.pageSize.height = scaledViewport.height;
                     }
 
-                    newPdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, 0, scaledViewport.width, scaledViewport.height, '', 'NONE');
+                    newPdf.addImage(currentCanvas.toDataURL('image/png', 1.0), 'PNG', 0, 0, scaledViewport.width, scaledViewport.height, '', 'NONE');
                 }
 
                 newPdf.save(`${fileName}-up.pdf`);
