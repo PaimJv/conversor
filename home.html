@@ -97,6 +97,7 @@
 
     <script>
         let conversionType = null;
+        const MAX_CANVAS_PIXELS = 16777216; // Common browser limit (e.g., 4096x4096)
 
         function selectConversion(type) {
             conversionType = type;
@@ -194,27 +195,31 @@
         }
 
         async function convertPdfToImage(pdfFile, fileName) {
-            const arrayBuffer = await pdfFile.arrayBuffer();
-            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-            const pdf = await loadingTask.promise;
+            try {
+                const arrayBuffer = await pdfFile.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const pdf = await loadingTask.promise;
 
-            const page = await pdf.getPage(1);
-            const scale = 4;
-            const viewport = page.getViewport({ scale: scale });
-            const canvas = document.createElement('canvas');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            const context = canvas.getContext('2d');
+                const page = await pdf.getPage(1);
+                const scale = 4;
+                const viewport = page.getViewport({ scale: scale });
+                const canvas = document.createElement('canvas');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                const context = canvas.getContext('2d');
 
-            context.imageSmoothingEnabled = true;
-            context.imageSmoothingQuality = 'high';
+                context.imageSmoothingEnabled = true;
+                context.imageSmoothingQuality = 'high';
 
-            await page.render({ canvasContext: context, viewport: viewport }).promise;
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
 
-            const link = document.createElement('a');
-            link.download = `${fileName}.png`;
-            link.href = canvas.toDataURL('image/png', 1.0);
-            link.click();
+                const link = document.createElement('a');
+                link.download = `${fileName}.png`;
+                link.href = canvas.toDataURL('image/png', 1.0);
+                link.click();
+            } catch (error) {
+                alert('Erro ao converter PDF para imagem: ' + error.message);
+            }
         }
 
         function upscaleImage(imageFile, fileName, scaleFactor) {
@@ -222,19 +227,52 @@
             reader.onload = function(event) {
                 const img = new Image();
                 img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width * scaleFactor;
-                    canvas.height = img.height * scaleFactor;
-                    const context = canvas.getContext('2d');
+                    try {
+                        const targetWidth = img.width * scaleFactor;
+                        const targetHeight = img.height * scaleFactor;
 
-                    context.imageSmoothingEnabled = true;
-                    context.imageSmoothingQuality = 'high';
-                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        // Check if canvas size exceeds browser limits
+                        if (targetWidth * targetHeight > MAX_CANVAS_PIXELS) {
+                            alert(`Erro: A imagem escalada para ${scaleFactor}x é muito grande. Tente um fator menor ou uma imagem menor.`);
+                            return;
+                        }
 
-                    const link = document.createElement('a');
-                    link.download = `${fileName}-up.png`;
-                    link.href = canvas.toDataURL('image/png', 1.0);
-                    link.click();
+                        // Stepwise scaling for 8x to reduce memory usage
+                        let steps = scaleFactor === 8 ? 2 : 1;
+                        let currentScale = scaleFactor === 8 ? 4 : scaleFactor;
+                        let currentWidth = img.width;
+                        let currentHeight = img.height;
+
+                        for (let i = 0; i < steps; i++) {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = currentWidth * currentScale;
+                            canvas.height = currentHeight * currentScale;
+                            const context = canvas.getContext('2d');
+
+                            context.imageSmoothingEnabled = true;
+                            context.imageSmoothingQuality = 'high';
+                            context.drawImage(i === 0 ? img : canvas, 0, 0, canvas.width, canvas.height);
+
+                            currentWidth = canvas.width;
+                            currentHeight = canvas.height;
+                            currentScale = scaleFactor === 8 ? 2 : 1;
+                        }
+
+                        const finalCanvas = document.createElement('canvas');
+                        finalCanvas.width = targetWidth;
+                        finalCanvas.height = targetHeight;
+                        const finalContext = finalCanvas.getContext('2d');
+                        finalContext.imageSmoothingEnabled = true;
+                        finalContext.imageSmoothingQuality = 'high';
+                        finalContext.drawImage(canvas, 0, 0, targetWidth, targetHeight);
+
+                        const link = document.createElement('a');
+                        link.download = `${fileName}-up.png`;
+                        link.href = finalCanvas.toDataURL('image/png', 1.0);
+                        link.click();
+                    } catch (error) {
+                        alert('Erro ao realizar upscale da imagem: ' + error.message);
+                    }
                 };
                 img.src = event.target.result;
             };
@@ -242,41 +280,74 @@
         }
 
         async function upscalePdf(pdfFile, fileName, scaleFactor) {
-            const arrayBuffer = await pdfFile.arrayBuffer();
-            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-            const pdfDoc = await loadingTask.promise;
+            try {
+                const arrayBuffer = await pdfFile.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const pdfDoc = await loadingTask.promise;
 
-            const { jsPDF } = window.jspdf;
-            const newPdf = new jsPDF({
-                unit: 'px',
-                compress: false
-            });
+                const { jsPDF } = window.jspdf;
+                const newPdf = new jsPDF({
+                    unit: 'px',
+                    compress: false
+                });
 
-            for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-                const page = await pdfDoc.getPage(pageNum);
-                const scaledViewport = page.getViewport({ scale: scaleFactor });
+                for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                    const page = await pdfDoc.getPage(pageNum);
+                    const scaledViewport = page.getViewport({ scale: scaleFactor });
 
-                const canvas = document.createElement('canvas');
-                canvas.height = scaledViewport.height;
-                canvas.width = scaledViewport.width;
-                const context = canvas.getContext('2d');
+                    // Check if canvas size exceeds browser limits
+                    if (scaledViewport.width * scaledViewport.height > MAX_CANVAS_PIXELS) {
+                        alert(`Erro: A página ${pageNum} escalada para ${scaleFactor}x é muito grande. Tente um fator menor.`);
+                        return;
+                    }
 
-                context.imageSmoothingEnabled = true;
-                context.imageSmoothingQuality = 'high';
+                    const canvas = document.createElement('canvas');
+                    canvas.height = scaledViewport.height;
+                    canvas.width = scaledViewport.width;
+                    const context = canvas.getContext('2d');
 
-                await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+                    context.imageSmoothingEnabled = true;
+                    context.imageSmoothingQuality = 'high';
 
-                if (pageNum > 1) {
-                    newPdf.addPage([scaledViewport.width, scaledViewport.height], scaledViewport.width > scaledViewport.height ? 'landscape' : 'portrait');
-                } else {
-                    newPdf.internal.pageSize.width = scaledViewport.width;
-                    newPdf.internal.pageSize.height = scaledViewport.height;
+                    // Stepwise rendering for 8x
+                    let steps = scaleFactor === 8 ? 2 : 1;
+                    let currentScale = scaleFactor === 8 ? 4 : scaleFactor;
+                    let tempViewport = page.getViewport({ scale: currentScale });
+
+                    for (let i = 0; i < steps; i++) {
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.height = tempViewport.height;
+                        tempCanvas.width = tempViewport.width;
+                        const tempContext = tempCanvas.getContext('2d');
+                        tempContext.imageSmoothingEnabled = true;
+                        tempContext.imageSmoothingQuality = 'high';
+
+                        await page.render({ canvasContext: tempContext, viewport: tempViewport }).promise;
+
+                        if (i < steps - 1) {
+                            tempViewport = page.getViewport({ scale: scaleFactor });
+                            canvas.height = tempViewport.height;
+                            canvas.width = tempViewport.width;
+                            context.drawImage(tempCanvas, 0, 0, tempViewport.width, tempViewport.height);
+                        } else {
+                            context.drawImage(tempCanvas, 0, 0, scaledViewport.width, scaledViewport.height);
+                        }
+                    }
+
+                    if (pageNum > 1) {
+                        newPdf.addPage([scaledViewport.width, scaledViewport.height], scaledViewport.width > scaledViewport.height ? 'landscape' : 'portrait');
+                    } else {
+                        newPdf.internal.pageSize.width = scaledViewport.width;
+                        newPdf.internal.pageSize.height = scaledViewport.height;
+                    }
+
+                    newPdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, 0, scaledViewport.width, scaledViewport.height, '', 'NONE');
                 }
 
-                newPdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, 0, scaledViewport.width, scaledViewport.height, '', 'NONE');
+                newPdf.save(`${fileName}-up.pdf`);
+            } catch (error) {
+                alert('Erro ao realizar upscale do PDF: ' + error.message);
             }
-
-            newPdf.save(`${fileName}-up.pdf`);
         }
     </script>
 </body>
