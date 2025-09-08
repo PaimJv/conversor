@@ -28,6 +28,13 @@
             padding: 10px 20px;
             font-size: 16px;
             cursor: pointer;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #0056b3;
         }
         #fileInput, #upscaleFileInput {
             display: none;
@@ -36,6 +43,29 @@
             margin: 10px;
             padding: 5px;
             font-size: 16px;
+            border-radius: 4px;
+        }
+        #upscaleOptions {
+            display: none;
+            margin-top: 20px;
+        }
+        #upscaleFileButton {
+            margin-top: 10px;
+        }
+        .drag-area {
+            border: 2px dashed #007bff;
+            padding: 20px;
+            margin: 10px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        .drag-area.dragover {
+            background-color: #e0e0e0;
+        }
+        .drag-area p {
+            margin: 0 0 10px 0;
+            color: #333;
         }
     </style>
 </head>
@@ -46,15 +76,22 @@
         <button onclick="selectConversion('imageToPdf')">Converter Imagem para PDF</button>
         <button onclick="selectConversion('pdfToImage')">Converter PDF para Imagem</button>
         <button onclick="selectConversion('upscaleImage')">Aprimorar Imagem</button>
+        <button onclick="selectConversion('upscalePdf')">Aprimorar PDF</button>
         <input type="file" id="fileInput" onchange="handleFileUpload()">
-        <input type="file" id="upscaleFileInput" accept="image/*" onchange="handleUpscaleUpload()">
-        <div id="upscaleOptions" style="display: none;">
+        <input type="file" id="upscaleFileInput" onchange="handleUpscaleUpload()">
+        <div id="upscaleOptions">
             <label for="scaleFactor">Escolha o fator de upscale:</label>
             <select id="scaleFactor">
                 <option value="2">2x</option>
                 <option value="4">4x</option>
                 <option value="8">8x</option>
             </select>
+            <div id="dragArea" class="drag-area">
+                <p>Arraste e solte o arquivo aqui ou</p>
+                <button id="upscaleFileButton" onclick="document.getElementById('upscaleFileInput').click()">
+                    Selecionar ou arrastar arquivo
+                </button>
+            </div>
         </div>
     </div>
 
@@ -66,27 +103,52 @@
             const fileInput = document.getElementById('fileInput');
             const upscaleFileInput = document.getElementById('upscaleFileInput');
             const upscaleOptions = document.getElementById('upscaleOptions');
+            const dragArea = document.getElementById('dragArea');
 
             if (type === 'imageToPdf') {
+                upscaleOptions.style.display = 'none';
                 fileInput.accept = 'image/*';
                 fileInput.click();
-                upscaleOptions.style.display = 'none';
             } else if (type === 'pdfToImage') {
+                upscaleOptions.style.display = 'none';
                 fileInput.accept = 'application/pdf';
                 fileInput.click();
-                upscaleOptions.style.display = 'none';
             } else if (type === 'upscaleImage') {
                 upscaleOptions.style.display = 'block';
-                upscaleFileInput.click();
+                dragArea.style.display = 'block';
+                upscaleFileInput.accept = 'image/*';
+            } else if (type === 'upscalePdf') {
+                upscaleOptions.style.display = 'block';
+                dragArea.style.display = 'block';
+                upscaleFileInput.accept = 'application/pdf';
             }
         }
+
+        // Drag-and-drop functionality
+        const dragArea = document.getElementById('dragArea');
+        dragArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dragArea.classList.add('dragover');
+        });
+        dragArea.addEventListener('dragleave', () => {
+            dragArea.classList.remove('dragover');
+        });
+        dragArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            const upscaleFileInput = document.getElementById('upscaleFileInput');
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            upscaleFileInput.files = dt.files;
+            handleUpscaleUpload();
+        });
 
         function handleFileUpload() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             if (!file) return;
 
-            // Extrai o nome do arquivo sem a extensão
             const fileName = file.name.split('.').slice(0, -1).join('.');
 
             if (conversionType === 'imageToPdf') {
@@ -103,7 +165,12 @@
 
             const fileName = file.name.split('.').slice(0, -1).join('.');
             const scaleFactor = parseInt(document.getElementById('scaleFactor').value);
-            upscaleImage(file, fileName, scaleFactor);
+
+            if (conversionType === 'upscaleImage') {
+                upscaleImage(file, fileName, scaleFactor);
+            } else if (conversionType === 'upscalePdf') {
+                upscalePdf(file, fileName, scaleFactor);
+            }
         }
 
         function convertImageToPdf(imageFile, fileName) {
@@ -160,7 +227,6 @@
                     canvas.height = img.height * scaleFactor;
                     const context = canvas.getContext('2d');
 
-                    // Configura para máxima qualidade
                     context.imageSmoothingEnabled = true;
                     context.imageSmoothingQuality = 'high';
                     context.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -173,6 +239,44 @@
                 img.src = event.target.result;
             };
             reader.readAsDataURL(imageFile);
+        }
+
+        async function upscalePdf(pdfFile, fileName, scaleFactor) {
+            const arrayBuffer = await pdfFile.arrayBuffer();
+            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+            const pdfDoc = await loadingTask.promise;
+
+            const { jsPDF } = window.jspdf;
+            const newPdf = new jsPDF({
+                unit: 'px',
+                compress: false
+            });
+
+            for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                const page = await pdfDoc.getPage(pageNum);
+                const scaledViewport = page.getViewport({ scale: scaleFactor });
+
+                const canvas = document.createElement('canvas');
+                canvas.height = scaledViewport.height;
+                canvas.width = scaledViewport.width;
+                const context = canvas.getContext('2d');
+
+                context.imageSmoothingEnabled = true;
+                context.imageSmoothingQuality = 'high';
+
+                await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+
+                if (pageNum > 1) {
+                    newPdf.addPage([scaledViewport.width, scaledViewport.height], scaledViewport.width > scaledViewport.height ? 'landscape' : 'portrait');
+                } else {
+                    newPdf.internal.pageSize.width = scaledViewport.width;
+                    newPdf.internal.pageSize.height = scaledViewport.height;
+                }
+
+                newPdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, 0, scaledViewport.width, scaledViewport.height, '', 'NONE');
+            }
+
+            newPdf.save(`${fileName}-up.pdf`);
         }
     </script>
 </body>
