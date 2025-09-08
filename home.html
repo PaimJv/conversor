@@ -29,8 +29,13 @@
             font-size: 16px;
             cursor: pointer;
         }
-        #fileInput {
+        #fileInput, #upscaleFileInput {
             display: none;
+        }
+        select {
+            margin: 10px;
+            padding: 5px;
+            font-size: 16px;
         }
     </style>
 </head>
@@ -40,7 +45,17 @@
         <p>Escolha uma opção:</p>
         <button onclick="selectConversion('imageToPdf')">Converter Imagem para PDF</button>
         <button onclick="selectConversion('pdfToImage')">Converter PDF para Imagem</button>
+        <button onclick="selectConversion('upscaleImage')">Aprimorar Imagem</button>
         <input type="file" id="fileInput" onchange="handleFileUpload()">
+        <input type="file" id="upscaleFileInput" accept="image/*" onchange="handleUpscaleUpload()">
+        <div id="upscaleOptions" style="display: none;">
+            <label for="scaleFactor">Escolha o fator de upscale:</label>
+            <select id="scaleFactor">
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+                <option value="8">8x</option>
+            </select>
+        </div>
     </div>
 
     <script>
@@ -49,12 +64,21 @@
         function selectConversion(type) {
             conversionType = type;
             const fileInput = document.getElementById('fileInput');
+            const upscaleFileInput = document.getElementById('upscaleFileInput');
+            const upscaleOptions = document.getElementById('upscaleOptions');
+
             if (type === 'imageToPdf') {
                 fileInput.accept = 'image/*';
+                fileInput.click();
+                upscaleOptions.style.display = 'none';
             } else if (type === 'pdfToImage') {
                 fileInput.accept = 'application/pdf';
+                fileInput.click();
+                upscaleOptions.style.display = 'none';
+            } else if (type === 'upscaleImage') {
+                upscaleOptions.style.display = 'block';
+                upscaleFileInput.click();
             }
-            fileInput.click();
         }
 
         function handleFileUpload() {
@@ -72,6 +96,16 @@
             }
         }
 
+        function handleUpscaleUpload() {
+            const upscaleFileInput = document.getElementById('upscaleFileInput');
+            const file = upscaleFileInput.files[0];
+            if (!file) return;
+
+            const fileName = file.name.split('.').slice(0, -1).join('.');
+            const scaleFactor = parseInt(document.getElementById('scaleFactor').value);
+            upscaleImage(file, fileName, scaleFactor);
+        }
+
         function convertImageToPdf(imageFile, fileName) {
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -82,9 +116,9 @@
                         orientation: img.width > img.height ? 'landscape' : 'portrait',
                         unit: 'px',
                         format: [img.width, img.height],
-                        compress: false // Desativa compressão para máxima qualidade
+                        compress: false
                     });
-                    pdf.addImage(img, 'PNG', 0, 0, img.width, img.height, '', 'NONE'); // Usa PNG e sem compressão
+                    pdf.addImage(img, 'PNG', 0, 0, img.width, img.height, '', 'NONE');
                     pdf.save(`${fileName}.pdf`);
                 };
                 img.src = event.target.result;
@@ -97,16 +131,14 @@
             const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
             const pdf = await loadingTask.promise;
 
-            // Para simplificar, convertemos apenas a primeira página para imagem
             const page = await pdf.getPage(1);
-            const scale = 4; // Aumenta a resolução para máxima qualidade
+            const scale = 4;
             const viewport = page.getViewport({ scale: scale });
             const canvas = document.createElement('canvas');
             canvas.height = viewport.height;
             canvas.width = viewport.width;
             const context = canvas.getContext('2d');
 
-            // Configura o canvas para máxima qualidade
             context.imageSmoothingEnabled = true;
             context.imageSmoothingQuality = 'high';
 
@@ -114,8 +146,33 @@
 
             const link = document.createElement('a');
             link.download = `${fileName}.png`;
-            link.href = canvas.toDataURL('image/png', 1.0); // Qualidade máxima para PNG
+            link.href = canvas.toDataURL('image/png', 1.0);
             link.click();
+        }
+
+        function upscaleImage(imageFile, fileName, scaleFactor) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width * scaleFactor;
+                    canvas.height = img.height * scaleFactor;
+                    const context = canvas.getContext('2d');
+
+                    // Configura para máxima qualidade
+                    context.imageSmoothingEnabled = true;
+                    context.imageSmoothingQuality = 'high';
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    const link = document.createElement('a');
+                    link.download = `${fileName}-up.png`;
+                    link.href = canvas.toDataURL('image/png', 1.0);
+                    link.click();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(imageFile);
         }
     </script>
 </body>
