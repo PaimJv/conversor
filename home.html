@@ -23,8 +23,6 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            max-width: 600px;
-            width: 100%;
         }
         button {
             margin: 10px;
@@ -109,6 +107,9 @@
         <button onclick="selectConversion('upscalePdf')">Aprimorar PDF</button>
         <button onclick="selectConversion('mergeFiles')">Juntar Arquivos em PDF</button>
 
+        <!-- Loading universal (agora aparece em todas as operações) -->
+        <div class="loading" id="globalLoading">Carregando...</div>
+
         <input type="file" id="fileInput" onchange="handleFileUpload()">
         <input type="file" id="upscaleFileInput" onchange="handleUpscaleUpload()">
         <input type="file" id="mergeFileInput" multiple onchange="handleMergeFiles()" accept=".pdf,image/*">
@@ -129,7 +130,6 @@
         </div>
 
         <div id="mergeOptions">
-            <div class="loading" id="mergeLoading">Carregando...</div>
             <div id="mergeDragArea" class="drag-area">
                 <p>Arraste e solte os arquivos aqui (PDFs e imagens) ou</p>
                 <button id="mergeFileButton" onclick="document.getElementById('mergeFileInput').click()">
@@ -145,306 +145,283 @@
 
     <script>
         let conversionType = null;
-        const MAX_CANVAS_PIXELS = 16777216;
         let mergeFiles = [];
+
+        function showLoading(show = true) {
+            document.getElementById('globalLoading').style.display = show ? 'block' : 'none';
+            document.querySelectorAll('button').forEach(b => b.disabled = show);
+        }
 
         function selectConversion(type) {
             conversionType = type;
-            const fileInput = document.getElementById('fileInput');
-            const upscaleFileInput = document.getElementById('upscaleFileInput');
-            const mergeFileInput = document.getElementById('mergeFileInput');
-            const upscaleOptions = document.getElementById('upscaleOptions');
-            const mergeOptions = document.getElementById('mergeOptions');
-            const dragArea = document.getElementById('dragArea');
-            const mergeDragArea = document.getElementById('mergeDragArea');
-
-            upscaleOptions.style.display = 'none';
-            mergeOptions.style.display = 'none';
+            document.getElementById('upscaleOptions').style.display = 'none';
+            document.getElementById('mergeOptions').style.display = 'none';
 
             if (type === 'imageToPdf') {
-                fileInput.accept = 'image/*';
-                fileInput.click();
+                document.getElementById('fileInput').accept = 'image/*';
+                document.getElementById('fileInput').click();
             } else if (type === 'pdfToImage') {
-                fileInput.accept = 'application/pdf';
-                fileInput.click();
+                document.getElementById('fileInput').accept = 'application/pdf';
+                document.getElementById('fileInput').click();
             } else if (type === 'upscaleImage') {
-                upscaleOptions.style.display = 'block';
-                dragArea.style.display = 'block';
-                upscaleFileInput.accept = 'image/*';
+                document.getElementById('upscaleOptions').style.display = 'block';
+                document.getElementById('upscaleFileInput').accept = 'image/*';
             } else if (type === 'upscalePdf') {
-                upscaleOptions.style.display = 'block';
-                dragArea.style.display = 'block';
-                upscaleFileInput.accept = 'application/pdf';
+                document.getElementById('upscaleOptions').style.display = 'block';
+                document.getElementById('upscaleFileInput').accept = 'application/pdf';
             } else if (type === 'mergeFiles') {
-                mergeOptions.style.display = 'block';
-                mergeDragArea.style.display = 'block';
+                document.getElementById('mergeOptions').style.display = 'block';
                 mergeFiles = [];
                 updateFileList();
             }
         }
 
-        // Drag-and-drop for upscale
+        // Drag-and-drop para upscale
         const dragArea = document.getElementById('dragArea');
-        dragArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dragArea.classList.add('dragover');
-        });
-        dragArea.addEventListener('dragleave', () => {
-            dragArea.classList.remove('dragover');
-        });
-        dragArea.addEventListener('drop', (e) => {
+        dragArea.addEventListener('dragover', e => { e.preventDefault(); dragArea.classList.add('dragover'); });
+        dragArea.addEventListener('dragleave', () => dragArea.classList.remove('dragover'));
+        dragArea.addEventListener('drop', e => {
             e.preventDefault();
             dragArea.classList.remove('dragover');
             const file = e.dataTransfer.files[0];
-            const upscaleFileInput = document.getElementById('upscaleFileInput');
-            const dt = new DataTransfer();
-            dt.items.add(file);
-            upscaleFileInput.files = dt.files;
-            handleUpscaleUpload();
+            if (file) {
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                document.getElementById('upscaleFileInput').files = dt.files;
+                handleUpscaleUpload();
+            }
         });
 
-        // Drag-and-drop for merge
+        // Drag-and-drop para juntar
         const mergeDragArea = document.getElementById('mergeDragArea');
-        mergeDragArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            mergeDragArea.classList.add('dragover');
-        });
-        mergeDragArea.addEventListener('dragleave', () => {
-            mergeDragArea.classList.remove('dragover');
-        });
-        mergeDragArea.addEventListener('drop', (e) => {
+        mergeDragArea.addEventListener('dragover', e => { e.preventDefault(); mergeDragArea.classList.add('dragover'); });
+        mergeDragArea.addEventListener('dragleave', () => mergeDragArea.classList.remove('dragover'));
+        mergeDragArea.addEventListener('drop', e => {
             e.preventDefault();
             mergeDragArea.classList.remove('dragover');
-            const files = Array.from(e.dataTransfer.files);
-            addMergeFiles(files);
+            addMergeFiles(Array.from(e.dataTransfer.files));
         });
 
         function handleFileUpload() {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
+            const file = document.getElementById('fileInput').files[0];
             if (!file) return;
+            const name = file.name.split('.').slice(0, -1).join('.');
 
-            const fileName = file.name.split('.').slice(0, -1).join('.');
-
-            if (conversionType === 'imageToPdf') {
-                convertImageToPdf(file, fileName);
-            } else if (conversionType === 'pdfToImage') {
-                convertPdfToImage(file, fileName);
-            }
+            showLoading(true);
+            if (conversionType === 'imageToPdf') convertImageToPdf(file, name);
+            else if (conversionType === 'pdfToImage') convertPdfToImage(file, name);
         }
 
         function handleUpscaleUpload() {
-            const upscaleFileInput = document.getElementById('upscaleFileInput');
-            const file = upscaleFileInput.files[0];
+            const file = document.getElementById('upscaleFileInput').files[0];
             if (!file) return;
-
-            const fileName = file.name.split('.').slice(0, -1).join('.');
-            const scaleFactor = parseInt(document.getElementById('scaleFactor').value);
-
-            if (conversionType === 'upscaleImage') {
-                upscaleImage(file, fileName, scaleFactor);
-            } else if (conversionType === 'upscalePdf') {
-                upscalePdf(file, fileName, scaleFactor);
-            }
+            const name = file.name.split('.').slice(0, -1).join('.');
+            const factor = parseInt(document.getElementById('scaleFactor').value);
+            showLoading(true);
+            if (conversionType === 'upscaleImage') upscaleImage(file, name, factor);
+            else if (conversionType === 'upscalePdf') upscalePdf(file, name, factor);
         }
 
         function handleMergeFiles() {
-            const files = Array.from(document.getElementById('mergeFileInput').files);
-            addMergeFiles(files);
+            addMergeFiles(Array.from(document.getElementById('mergeFileInput').files));
         }
 
         function addMergeFiles(files) {
-            const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-            const newFiles = files.filter(file => validTypes.includes(file.type));
-            mergeFiles = mergeFiles.concat(newFiles);
+            const valid = files.filter(f => ['application/pdf','image/png','image/jpeg','image/jpg','image/webp'].includes(f.type));
+            mergeFiles = mergeFiles.concat(valid);
             updateFileList();
         }
 
         function updateFileList() {
-            const fileList = document.getElementById('fileList');
-            const mergeButton = document.getElementById('mergeButton');
+            const list = document.getElementById('fileList');
+            const btn = document.getElementById('mergeButton');
             if (mergeFiles.length === 0) {
-                fileList.style.display = 'none';
-                mergeButton.style.display = 'none';
+                list.style.display = 'none';
+                btn.style.display = 'none';
                 return;
             }
-
-            fileList.innerHTML = '';
-            mergeFiles.forEach((file, index) => {
-                const div = document.createElement('div');
-                div.className = 'file-item';
-                div.innerHTML = `
-                    <span>${file.name} (${(file.size / 1024).toFixed(1)} KB)</span>
-                    <span class="remove-file" onclick="removeMergeFile(${index})">X</span>
-                `;
-                fileList.appendChild(div);
-            });
-
-            fileList.style.display = 'block';
-            mergeButton.style.display = 'inline-block';
+            list.innerHTML = mergeFiles.map((f,i) => `
+                <div class="file-item">
+                    <span>${f.name}</span>
+                    <span class="remove-file" onclick="mergeFiles.splice(${i},1);updateFileList()">×</span>
+                </div>
+            `).join('');
+            list.style.display = 'block';
+            btn.style.display = 'inline-block';
         }
 
-        function removeMergeFile(index) {
-            mergeFiles.splice(index, 1);
-            updateFileList();
-        }
-
+        // ==================== JUNÇÃO PERFEITA: MESMA LARGURA, SEM FAIXA BRANCA, QUALIDADE MÁXIMA ====================
         async function mergeSelectedFiles() {
             if (mergeFiles.length === 0) return;
-
-            const loading = document.getElementById('mergeLoading');
-            loading.style.display = 'block';
+            showLoading(true);
 
             try {
                 const pdfDoc = await PDFLib.PDFDocument.create();
-
                 let maxWidth = 0;
-                const pageData = [];
+                const pages = [];
 
-                // Primeiro passe: medir a maior largura (usando loadImage para imagens, getWidth para PDFs)
+                // 1ª passada: coleta todas as páginas e calcula largura máxima
                 for (const file of mergeFiles) {
                     if (file.type === 'application/pdf') {
-                        const arrayBuffer = await file.arrayBuffer();
-                        const donorPdf = await PDFLib.PDFDocument.load(arrayBuffer);
-                        const pages = donorPdf.getPages();
-                        for (let i = 0; i < pages.length; i++) {
-                            const page = pages[i];
+                        const buf = await file.arrayBuffer();
+                        const src = await PDFLib.PDFDocument.load(buf);
+                        for (const page of src.getPages()) {
                             maxWidth = Math.max(maxWidth, page.getWidth());
-                            pageData.push({ type: 'pdf', donorPdf, pageIndex: i });
+                            pages.push({ type: 'pdf', page, src });
                         }
                     } else {
-                        // Para imagens: usar loadImage para obter dimensões sem rasterizar
-                        const dataUrl = await readFileAsDataURL(file);
-                        const img = await loadImage(dataUrl);
-                        maxWidth = Math.max(maxWidth, img.width);
-                        pageData.push({ type: 'image', file, fileType: file.type });
+                        const buf = await file.arrayBuffer();
+                        const img = file.type.includes('jpg') || file.type.includes('jpeg')
+                            ? await pdfDoc.embedJpg(buf)
+                            : await pdfDoc.embedPng(buf);
+                        const { width } = img.scale(1);
+                        maxWidth = Math.max(maxWidth, width);
+                        pages.push({ type: 'image', img, width, height: img.scale(1).height });
                     }
                 }
 
-                // Segundo passe: criar páginas com largura uniforme (sem limite artificial, qualidade máxima)
-                for (let i = 0; i < pageData.length; i++) {
-                    const data = pageData[i];
+                // 2ª passada: cria páginas com largura unificada
+                for (const item of pages) {
+                    const origWidth = item.type === 'pdf' ? item.page.getWidth() : item.width;
+                    const origHeight = item.type === 'pdf' ? item.page.getHeight() : item.height;
+                    const scale = maxWidth / origWidth;
+                    const newHeight = origHeight * scale;
 
-                    let originalWidth, originalHeight, embedded;
+                    const page = pdfDoc.addPage([maxWidth, newHeight]);
 
-                    if (data.type === 'pdf') {
-                        const embeddedPages = await pdfDoc.embedPdf(data.donorPdf, [data.pageIndex]);
-                        embedded = embeddedPages[0];
-                        originalWidth = embedded.width;
-                        originalHeight = embedded.height;
+                    if (item.type === 'pdf') {
+                        const emb = await pdfDoc.embedPage(item.page);
+                        page.drawPage(emb, { x: 0, y: 0, xScale: scale, yScale: scale });
                     } else {
-                        const arrayBuffer = await readFileAsArrayBuffer(data.file);
-                        embedded = data.fileType.includes('jpeg') || data.fileType.includes('jpg') 
-                            ? await pdfDoc.embedJpg(arrayBuffer) 
-                            : await pdfDoc.embedPng(arrayBuffer);
-                        originalWidth = embedded.width;
-                        originalHeight = embedded.height;
-                    }
-
-                    const scale = maxWidth / originalWidth;
-                    const targetHeight = originalHeight * scale;
-
-                    const newPage = pdfDoc.addPage([maxWidth, targetHeight]);
-
-                    if (data.type === 'pdf') {
-                        newPage.drawPage(embedded, {
-                            x: 0,
-                            y: 0,
-                            xScale: scale,
-                            yScale: scale
-                        });
-                    } else {
-                        newPage.drawImage(embedded, {
-                            x: 0,
-                            y: 0,
-                            width: maxWidth,
-                            height: targetHeight
-                        });
+                        page.drawImage(item.img, { x: 0, y: 0, width: maxWidth, height: newHeight });
                     }
                 }
 
-                const pdfBytes = await pdfDoc.save();
-                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const bytes = await pdfDoc.save();
+                const blob = new Blob([bytes], { type: 'application/pdf' });
                 const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = 'arquivos agrupados.pdf';
-                link.click();
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'arquivos_juntos.pdf';
+                a.click();
                 URL.revokeObjectURL(url);
-            } catch (error) {
-                alert(`Erro ao processar arquivos: ${error.message}`);
+            } catch (e) {
+                alert('Erro ao juntar: ' + e.message);
             } finally {
-                loading.style.display = 'none';
+                showLoading(false);
             }
         }
 
-        function readFileAsArrayBuffer(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsArrayBuffer(file);
-            });
-        }
-
-        function readFileAsDataURL(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        }
-
-        function loadImage(src) {
-            return new Promise((resolve, reject) => {
+        // ==================== IMAGEM → PDF ====================
+        function convertImageToPdf(file, name) {
+            const r = new FileReader();
+            r.onload = e => {
                 const img = new Image();
-                img.onload = () => resolve(img);
-                img.onerror = reject;
-                img.src = src;
-            });
+                img.onload = () => {
+                    const pdf = new jsPDF({
+                        orientation: img.width > img.height ? 'l' : 'p',
+                        unit: 'px',
+                        format: [img.width, img.height]
+                    });
+                    pdf.addImage(e.target.result, 'PNG', 0, 0, img.width, img.height);
+                    pdf.save(`${name}.pdf`);
+                    showLoading(false);
+                };
+                img.src = e.target.result;
+            };
+            r.readAsDataURL(file);
         }
 
-        // As outras funções permanecem iguais (convertImageToPdf, convertPdfToImage, upscaleImage, upscalePdf com pdf-lib)
-        // upscalePdf agora usa pdf-lib para upscale vetorial (100% qualidade, texto selecionável)
-
-        async function upscalePdf(pdfFile, fileName, scaleFactor) {
+        // ==================== PDF → IMAGENS (AGORA FUNCIONA) ====================
+        async function convertPdfToImage(file, baseName) {
             try {
-                const arrayBuffer = await pdfFile.arrayBuffer();
-                const originalPdf = await PDFLib.PDFDocument.load(arrayBuffer);
+                const buf = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const viewport = page.getViewport({ scale: 4 });
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    const ctx = canvas.getContext('2d');
+                    await page.render({ canvasContext: ctx, viewport }).promise;
+
+                    const link = document.createElement('a');
+                    link.download = `${baseName}_pagina_${i}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                }
+                showLoading(false);
+            } catch (e) {
+                alert('Erro ao converter PDF para imagens: ' + e.message);
+                showLoading(false);
+            }
+        }
+
+        // ==================== UPSCALE IMAGEM ====================
+        function upscaleImage(file, name, factor) {
+            const r = new FileReader();
+            r.onload = e => {
+                const img = new Image();
+                img.onload = () => {
+                    const w = img.width * factor;
+                    const h = img.height * factor;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    if (factor === 8) {
+                        ctx.drawImage(img, 0, 0, w/2, h/2);
+                        ctx.drawImage(canvas, 0, 0, w/2, h/2, 0, 0, w, h);
+                    } else {
+                        ctx.drawImage(img, 0, 0, w, h);
+                    }
+                    canvas.toBlob(b => {
+                        const url = URL.createObjectURL(b);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${name}_up.png`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        showLoading(false);
+                    }, 'image/png');
+                };
+                img.src = e.target.result;
+            };
+            r.readAsDataURL(file);
+        }
+
+        // ==================== UPSCALE PDF (mantém texto selecionável) ====================
+        async function upscalePdf(file, name, factor) {
+            try {
+                const buf = await file.arrayBuffer();
+                const pdf = await PDFLib.PDFDocument.load(buf);
                 const newPdf = await PDFLib.PDFDocument.create();
 
-                const pages = originalPdf.getPages();
-                for (let i = 0; i < pages.length; i++) {
-                    const embeddedPages = await newPdf.embedPdf(originalPdf, [i]);
-                    const embeddedPage = embeddedPages[0];
-
-                    const scaledWidth = embeddedPage.width * scaleFactor;
-                    const scaledHeight = embeddedPage.height * scaleFactor;
-
-                    const newPage = newPdf.addPage([scaledWidth, scaledHeight]);
-                    newPage.drawPage(embeddedPage, {
-                        x: 0,
-                        y: 0,
-                        xScale: scaleFactor,
-                        yScale: scaleFactor
-                    });
+                for (const page of pdf.getPages()) {
+                    const { width, height } = page.getSize();
+                    const newPage = newPdf.addPage([width * factor, height * factor]);
+                    const emb = await newPdf.embedPage(page);
+                    newPage.drawPage(emb, { x: 0, y: 0, xScale: factor, yScale: factor });
                 }
 
-                const pdfBytes = await newPdf.save();
-                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const bytes = await newPdf.save();
+                const blob = new Blob([bytes], { type: 'application/pdf' });
                 const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `${fileName}-up.pdf`;
-                link.click();
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${name}_up.pdf`;
+                a.click();
                 URL.revokeObjectURL(url);
-            } catch (error) {
-                alert('Erro ao realizar upscale do PDF: ' + error.message);
+            } catch (e) {
+                alert('Erro ao aprimorar PDF: ' + e.message);
+            } finally {
+                showLoading(false);
             }
         }
-
-        // ... (o resto do código permanece o mesmo)
     </script>
 </body>
 </html>
